@@ -10,6 +10,18 @@ Usage:
     python ste_check.py --strict FILE
     cat draft.txt | python ste_check.py -
     python ste_check.py --json FILE
+    python ste_check.py --profile writing FILE
+
+Profiles:
+    ste80    (default) the STE80 rules this skill teaches.
+    writing  compatible with a scientific-writing style guide that keeps closed em-dashes, uses
+             "However", "Thus" and "Crucially" as connectives, wants varied sentence length (a short
+             topic sentence, then a long one), and writes Methods in the passive where that is the
+             convention. It keeps the AI-tell checks and semicolons, raises the sentence limit to 55
+             words, drops the STE structure checks (dashes, passive, perfect and progressive tenses,
+             -ing forms, phrasal verbs, paragraph length, vague association) and the plain-vocabulary
+             swaps that change meaning in technical prose ("identical", "whether", "verify",
+             "determine", "indicate"), and stops at a References heading.
 
 Exit code: 0 if no findings, 1 if findings, 2 on usage error.
 """
@@ -85,6 +97,23 @@ TELLS = [
     (r"^(?:that'?s|this is) (?:the real|why it|what) ", "closer", "possible one-line closer: cut it if it repeats the point"),
 ]
 
+# The `writing` profile keeps only the swaps that flag AI stock language. The plain-vocabulary swaps
+# above are right for STE but change meaning in technical prose: "byte-identical" is not "byte-same",
+# "whether" is not "if" in a conditional, and "verify" names a procedure.
+WRITING_SWAPS = {w: SWAPS[w] for w in (
+    "it is important to note", "it's important to note", "it should be noted",
+    "delve", "seamless", "seamlessly", "pivotal", "landscape", "realm", "showcase", "streamline",
+    "empower", "harness", "foster", "underscore", "game-changer", "tapestry", "testament", "elevate",
+    "unlock", "intricate", "meticulous", "vibrant", "groundbreaking", "cutting-edge", "world-class",
+    "best-in-class", "renowned", "stunning", "breathtaking", "serves as", "stands as", "boasts",
+)}
+
+# Rules the `writing` profile does not report. Each is a deliberate convention of that style guide.
+WRITING_SKIPS = {"dash", "passive", "modal-passive", "perfect-tense", "progressive", "ing-form",
+                 "phrasal-verb", "paragraph-length", "vague-association"}
+WRITING_SENTENCE_MAX = 55
+REFERENCES_RE = re.compile(r"^\s*#+\s*(?:references|bibliography|literature cited|works cited)\b", re.I)
+
 PHRASAL = [
     "set up", "find out", "look into", "look at", "fill in", "fill out",
     "turn on", "turn off", "switch on", "switch off", "go through",
@@ -130,13 +159,19 @@ class Finding:
     excerpt: str
 
 
-def strip_markdown(text: str) -> list[tuple[int, str]]:
-    """Return (line_no, line) for prose lines. Drop code blocks, tables, front matter."""
+def strip_markdown(text: str, stop_at_references: bool = False) -> list[tuple[int, str]]:
+    """Return (line_no, line) for prose lines. Drop code blocks, tables, front matter.
+
+    With `stop_at_references`, everything from a References (or Bibliography) heading on is dropped:
+    a reference list is not prose, and its punctuation belongs to the cited source.
+    """
     out = []
     in_code = False
     in_front = False
     for i, raw in enumerate(text.splitlines(), 1):
         line = raw.rstrip()
+        if stop_at_references and not in_code and REFERENCES_RE.match(line):
+            break
         if i == 1 and line.strip() == "---":
             in_front = True
             continue
@@ -180,7 +215,7 @@ def paragraphs(lines: list[tuple[int, str]]) -> list[tuple[int, str]]:
 
 def sentences(paragraph: str) -> list[str]:
     protected = re.sub(r"\b(e\.g|i\.e|etc|vs|Dr|Mr|Ms|No)\.", lambda m: m.group(0).replace(".", "§"), paragraph)
-    parts = re.split(r"(?<=[.!?:])\s+(?=[A-Z0-9\"'(])", protected)
+    parts = re.split(r"(?<=[.!?:])\s+(?=[A-Z0-9\"'(\[])", protected)
     return [p.replace("§", ".").strip() for p in parts if p.strip()]
 
 
@@ -203,9 +238,17 @@ def is_imperative(sentence: str) -> bool:
     }
 
 
-def check(text: str, strict: bool) -> list[Finding]:
+def check(text: str, strict: bool, profile: str = "ste80") -> list[Finding]:
+    writing = profile == "writing"
+    f = _check(text, strict, writing)
+    if writing:
+        f = [x for x in f if x.rule not in WRITING_SKIPS]
+    return f
+
+
+def _check(text: str, strict: bool, writing: bool) -> list[Finding]:
     f: list[Finding] = []
-    lines = strip_markdown(text)
+    lines = strip_markdown(text, stop_at_references=writing)
     raw_by_no = dict(enumerate(text.splitlines(), 1))
 
     for start, para in paragraphs(lines):
@@ -214,6 +257,10 @@ def check(text: str, strict: bool) -> list[Finding]:
             f.append(Finding(start, "paragraph-length", f"{len(sents)} sentences in one paragraph (max 6)", para[:80]))
         for s in sents:
             n = count_words(s)
+            if writing:
+                if n > WRITING_SENTENCE_MAX:
+                    f.append(Finding(start, "sentence-length", f"{n} words (max {WRITING_SENTENCE_MAX})", s[:100]))
+                continue
             limit = 20 if is_imperative(s) else 25
             slack = 0 if strict else 3
             if n > limit + slack:
@@ -251,8 +298,8 @@ def check(text: str, strict: bool) -> list[Finding]:
                 f.append(Finding(no, rule, msg, line.strip()[:100]))
         if re.search(r"[“”‘’]", raw_by_no.get(no, "")):
             f.append(Finding(no, "curly-quotes", "curly quotes: use straight quotes in Markdown and code", line.strip()[:100]))
-        swaps = dict(SWAPS)
-        if strict:
+        swaps = dict(WRITING_SWAPS if writing else SWAPS)
+        if strict and not writing:
             swaps.update(STRICT_ONLY_SWAPS)
             if CONTRACTION_RE.search(line):
                 f.append(Finding(no, "contraction", "contraction (not permitted in strict mode)", line.strip()[:100]))
@@ -265,8 +312,8 @@ def check(text: str, strict: bool) -> list[Finding]:
     return f
 
 
-def summary(text: str) -> dict:
-    paras = paragraphs(strip_markdown(text))
+def summary(text: str, profile: str = "ste80") -> dict:
+    paras = paragraphs(strip_markdown(text, stop_at_references=profile == "writing"))
     sents = [s for _, p in paras for s in sentences(p)]
     counts = [count_words(s) for s in sents] or [0]
     return {
@@ -282,6 +329,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("files", nargs="+", help="files to check, or - for stdin")
     ap.add_argument("--strict", action="store_true", help="strict mode: exact limits, more word rules")
     ap.add_argument("--json", action="store_true", help="output JSON")
+    ap.add_argument("--profile", choices=("ste80", "writing"), default="ste80",
+                    help="rule set: ste80 (default) or writing (see the module docstring)")
     args = ap.parse_args(argv)
 
     total = 0
@@ -292,9 +341,11 @@ def main(argv: list[str]) -> int:
         else:
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-        findings = check(text, args.strict)
+        if args.strict and args.profile == "writing":
+            ap.error("--strict applies to the ste80 profile only")
+        findings = check(text, args.strict, args.profile)
         total += len(findings)
-        stats = summary(text)
+        stats = summary(text, args.profile)
         if args.json:
             report.append({"file": path, "stats": stats, "findings": [asdict(x) for x in findings]})
             continue

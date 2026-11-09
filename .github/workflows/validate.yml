@@ -26,6 +26,14 @@ jobs:
           echo "The gateway examines the token." > good.txt
           python scripts/ste_check.py good.txt
 
+      - name: Writing profile keeps the tell checks and passes the style guide's own conventions
+        run: |
+          echo "It is important to note that this result is a testament to seamless work." > tells.txt
+          if python scripts/ste_check.py --profile writing tells.txt; then echo "expected findings"; exit 1; fi
+          printf 'However, the outputs were byte-identical\xe2\x80\x94as the protocol requires\xe2\x80\x94and we verify whether each run gives the same score.\n\nCrucially, the reads were aligned with LASTZ before netting.\n\n## References\n\n1. Smith, J.; Doe, A. A paper. Journal 1:1-2 (2020).\n' > voice.txt
+          python scripts/ste_check.py --profile writing voice.txt
+          if python scripts/ste_check.py voice.txt; then echo "ste80 should still flag voice.txt"; exit 1; fi
+
       - name: Version is the same everywhere
         run: |
           v_skill=$(grep -E '^\s+version:' SKILL.md | head -1 | sed -E 's/.*"(.*)".*/\1/')

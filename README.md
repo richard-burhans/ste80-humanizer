@@ -204,6 +204,22 @@ cat draft.txt | python scripts/ste_check.py -
 
 It is a heuristic, not an AI detector and not a compliance checker.
 
+### The writing profile
+
+`--profile writing` makes the checker usable on scientific papers and grants written to a house style that differs from STE on purpose:
+
+- It keeps closed em-dashes, the connectives "However", "Thus" and "Crucially", long sentences next to short ones, and the passive voice of a Methods section.
+- It still flags the AI tells, the AI stock words and semicolons.
+- It allows sentences up to 55 words.
+- It does not swap plain vocabulary that changes meaning in technical prose ("byte-identical" is not "byte-same", and "whether" is not "if" in a conditional).
+- It stops at a References heading.
+
+```bash
+python scripts/ste_check.py --profile writing manuscript.md
+```
+
+On one 560-sentence Nature Methods draft that already passes such a style guide, the default profile reports 319 findings and the writing profile reports none.
+
 ## Tests
 
 `evals/` has four cases in the `claude plugin eval` format: a README rewrite, an explanation from scratch, a strict runbook and a casual LinkedIn post that does not mention STE. Run them with `claude plugin eval . --allow-tools Write,Edit,Bash`.

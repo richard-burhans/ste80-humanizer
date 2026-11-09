@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.2.0
+
+- `ste_check.py --profile writing`: a rule set for scientific and grant prose written to a style guide that keeps closed em-dashes, uses "However", "Thus" and "Crucially" as connectives, wants varied sentence length, and writes Methods in the passive. It keeps the AI-tell checks and semicolons, raises the sentence limit to 55 words, drops the STE structure checks and the plain-vocabulary swaps that change meaning in technical prose ("identical", "whether", "verify", "determine", "indicate"), and stops at a References heading. The default profile (`ste80`) is unchanged.
+- The sentence splitter now starts a new sentence at an opening `[` (both profiles).
+
 ## 3.1.0
 
 - Renamed from `humanizer-ste80` to `ste80-humanizer` ("STE80 Humanizer"). Install with `npx skills add Dodaios/ste80-humanizer`. The slash command is now `/ste80-humanizer`.
